@@ -50,6 +50,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const multi_shot_tests = b.addTest(.{
+        .root_source_file = b.path("src/channel/multi_shot_tube.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_multi_shot_tests = b.addRunArtifact(multi_shot_tests);
+
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);
 
     // Similar to creating the run step earlier, this exposes a `test` step to
@@ -58,4 +66,5 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_lib_unit_tests.step);
     test_step.dependOn(&run_exe_unit_tests.step);
+    test_step.dependOn(&run_multi_shot_tests.step);
 }

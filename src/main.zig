@@ -24,6 +24,7 @@ pub fn main() anyerror!void {
         .allocator = std.heap.page_allocator,
     };
     _ = try game.iterateAndGetState();
+    _ = MultiShotTube(u8, 10){};
 
     // Main game loop
     while (!rl.windowShouldClose()) {
@@ -50,3 +51,5 @@ pub fn main() anyerror!void {
     // Uncomment the following line if you want the server thread to be waited for
     // serverThread.join();
 }
+
+test "some test" {}

@@ -49,6 +49,26 @@ pub fn DoubleBuffer(comptime T: type, comptime cap: usize) type {
                 std.mem.copyForwards(T, bufToWrite, value);
             }
         }
+
+        pub fn writeBufferWhileLocked(self: *Self, processor: fn ([]T) void) void {
+            const writeBundle: struct { buf: *[cap]T, lock: *std.Thread.Mutex } = blk: {
+                switch (self.writeable_idx.load(.seq_cst)) {
+                    .Marco => {
+                        self.writeable_idx.store(.Polo, .seq_cst);
+                        break :blk .{ .buf = &self.marco, .lock = &self.marco_mtx };
+                    },
+                    .Polo => {
+                        self.writeable_idx.store(.Marco, .seq_cst);
+                        break :blk .{ .buf = &self.polo, .lock = &self.polo_mtx };
+                    },
+                }
+            };
+            const buf = writeBundle.buf;
+            var bufMtx = writeBundle.lock;
+            bufMtx.lock();
+            defer bufMtx.unlock();
+            processor(buf);
+        }
     };
 }
 
@@ -56,7 +76,49 @@ test "same thread usage" {
     var db = DoubleBuffer(u8, 1){};
     db.writeBuffer(&[_]u8{1});
     var buf = db.getBuffer();
-    buf.lock.lock();
-    defer buf.lock.unlock();
-    try std.testing.expect(buf.buf[0] == 1);
+    {
+        buf.lock.lock();
+        defer buf.lock.unlock();
+        try std.testing.expect(buf.buf[0] == 1);
+    }
+
+    db.writeBufferWhileLocked(processorFn);
+    {
+        const buf2 = db.getBuffer();
+        std.debug.print("buf2: {any}\n", .{buf2.buf});
+        try std.testing.expect(buf2.buf[0] == 1);
+    }
+}
+
+fn processorFn(buf: []u8) void {
+    buf[0] += 1;
+    std.time.sleep(std.time.ns_per_s * 1);
+}
+
+test "multi thread usage" {
+    var db = DoubleBuffer(u8, 1){};
+    const threadUI = try std.Thread.spawn(.{}, uiThread, .{ 1, &db });
+    const threadBackground = try std.Thread.spawn(.{}, backgroundThread, .{ 1, &db });
+    threadUI.join();
+    threadBackground.join();
+}
+
+// test functions
+fn uiThread(comptime cap: usize, db: *DoubleBuffer(u8, cap)) void {
+    var numRead: u8 = 0;
+    while (numRead < 10) {
+        var buf = db.getBuffer();
+        buf.lock.lock();
+        defer buf.lock.unlock();
+        std.debug.print("Received value: {d}\n", .{buf.buf[0]});
+        numRead += 1;
+    }
+}
+
+fn backgroundThread(comptime cap: usize, db: *DoubleBuffer(u8, cap)) void {
+    var numSent: u8 = 0;
+    while (numSent < 10) {
+        db.writeBufferWhileLocked(processorFn);
+        numSent += 1;
+    }
 }
