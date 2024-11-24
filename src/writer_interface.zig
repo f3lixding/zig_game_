@@ -42,6 +42,10 @@ pub const File = struct {
 // This init function serves the following purposes:
 // - Use reflection during compile time to inspect the pointer passed in to infer the type
 // - Using the type information, we construct a function during compitle time to create function that takes the *anyopaque and turns it into the concrete type
+//
+// You might think that you can use generics to achieve the same result (see example below)
+// But generics variables need to be stated explicitly and as a result the interface will be recognized as different types
+// So the most valuable thing offered here is the fact this interface obscures / hides the underlying type
 pub const RefinedWriter = struct {
     ptr: *anyopaque,
     writeAllFn: *const fn (ptr: *anyopaque, data: []const u8) anyerror!void,
@@ -49,6 +53,7 @@ pub const RefinedWriter = struct {
     // Note that this argument is anytype
     // This is because the logic here (besides return) is all done at compile time
     // We need to inspect the type passed in and create a function that knows what type to cast the *anyopaque to
+    // Also note that this is a "static" function as opposed to a method
     pub fn init(ptr: anytype) RefinedWriter {
         const T = @TypeOf(ptr);
         const ptr_info = @typeInfo(T);
@@ -83,6 +88,12 @@ pub const RefinedFile = struct {
     }
 };
 
+// There is another way to accommodate the ergonomics of the interface
+// And that is to use generics
+// Since the RefinedWriter is just doing reflection during compile time to understand which concrete type to cast the *anyopaque to
+// We can just as easily rely on generics to achieve the same result
+// HOWEVER, the downside is that the generic type is "colored".
+// This means we can't really have strongly typed collection of interfaces this way, i.e. []GenericWriter(?)
 pub fn GenericWriter(comptime T: type) type {
     return struct {
         ptr: *T,
@@ -111,7 +122,7 @@ test "crude writer" {
     var writer = file.crudeWriter();
     try writer.writeAll("Writing from an interface\n");
     // but there is no way to call writeAll direclty
-    // You'll have to do something like this
+    // You'll have to do something like this, which is not really all that ergonomic
     try File.writeAll(@ptrCast(&file), "Writing directly\n");
 }
 
