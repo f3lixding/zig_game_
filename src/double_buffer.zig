@@ -72,7 +72,27 @@ pub fn DoubleBuffer(comptime T: type, comptime cap: usize) type {
     };
 }
 
+test "pointer cast" {
+    const anonFn = struct {
+        fn acceptAnyOpaque(ptr: *anyopaque) void {
+            const presumeU8: *u8 = @ptrCast(@alignCast(ptr));
+            std.debug.print("{d}\n", .{presumeU8.*});
+        }
+    }.acceptAnyOpaque;
+    var val: u8 = 1;
+    anonFn(&val);
+}
+
+test "format print" {
+    const allocator = std.testing.allocator;
+    const res = try std.fmt.allocPrint(allocator, "this is a number {d}\n", .{1});
+    defer allocator.free(res);
+    std.debug.print("{s}\n", .{res});
+}
+
 test "same thread usage" {
+    const allocator = std.testing.allocator;
+    allocator.alloc(1);
     var db = DoubleBuffer(u8, 1){};
     db.writeBuffer(&[_]u8{1});
     var buf = db.getBuffer();
