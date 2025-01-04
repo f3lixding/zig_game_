@@ -18,31 +18,39 @@ pub fn IO(comptime storageSize: usize) type {
 
         kq: std.posix.fd_t,
 
-        // For now we will just use a simple array
-        incoming: [storageSize][]const u8 = std.mem.zeroes([storageSize][]const u8),
+        incoming: [storageSize]IOEvent = [_]IOEvent{undefined} ** storageSize,
 
         // This points to the next index to write into the incoming buffer
         cur_idx: usize = 0,
 
         // This function is to be called from the same thread as the main thread
         pub fn write(self: *Self, data: []const u8) !void {
+            std.debug.assert(data.len > 0);
             if (self.cur_idx >= storageSize) return IOError.EventQueueFull;
             self.incoming[self.cur_idx] = data;
             self.cur_idx += 1;
         }
 
-        // This is also to be called from main thread
+        pub fn read(self: *Self, begin: usize, end: usize) !void {
+            std.debug.assert(begin < end);
+            if (self.cur_idx >= storageSize) return IOError.EventQueueFull;
+            self.incoming[self.cur_idx] = .{ .read = .{ begin, end } };
+            self.cur_idx += 1;
+        }
+
         // This is doable because for write and runForNs are to be called from the same thread
         // It does two things here:
         // - Takes everything from the incoming buffer and resets the cur_idx to zero
         // - Writes buffer to destination using std.posix.pwrite
         // - For pwrite calls that cannot be completed right away, we enqueue it again onto incoming
+        // The documentation of kevent states that there will only be one unique event for every event queue. And an unique event is defined by the pair of (ident, filter)
         pub fn run_for_ns(self: *Self, ns: u64) !void {
             var should_keep_running = true;
             const time_now = std.time.nanoTimestamp();
+            var bytes_written: usize = 0;
             while (should_keep_running) {
                 var event_queue: [256]std.posix.Kevent = undefined;
-                const writes = for (self.incoming[0..self.cur_idx], 0..) |_, i| {
+                const writes = for (self.incoming[0..self.cur_idx], 0..self.cur_idx) |_, i| {
                     event_queue[i] = std.posix.Kevent{
                         .ident = @intCast(self.fd),
                         .filter = std.posix.system.EVFILT_WRITE,
@@ -51,11 +59,8 @@ pub fn IO(comptime storageSize: usize) type {
                         .data = 0,
                         .udata = i, // We don't want to lose track of the slice info so we should just use the index here
                     };
-                    if (i + 1 == self.cur_idx) {
-                        break self.cur_idx;
-                    }
                 } else blk: {
-                    break :blk self.cur_idx;
+                    break :blk self.cur_idx - 1;
                 };
                 self.cur_idx = 0;
                 var ts = std.mem.zeroes(std.posix.timespec);
@@ -68,7 +73,7 @@ pub fn IO(comptime storageSize: usize) type {
                     const idx = event.udata;
                     std.debug.assert(idx < self.incoming.len);
                     // TODO: make offset account for the bytes already written
-                    const res = std.posix.pwrite(self.fd, self.incoming[idx], 0) catch |err| switch (err) {
+                    const res = std.posix.pwrite(self.fd, self.incoming[idx], bytes_written) catch |err| switch (err) {
                         std.posix.PWriteError.WouldBlock => {
                             self.incoming[self.cur_idx] = self.incoming[idx];
                             self.cur_idx += 1;
@@ -83,6 +88,7 @@ pub fn IO(comptime storageSize: usize) type {
                             continue;
                         },
                     };
+                    bytes_written += res;
                     if (res < self.incoming[idx].len) {
                         self.incoming[self.cur_idx] = self.incoming[idx][res..];
                         self.cur_idx += 1;
@@ -95,9 +101,17 @@ pub fn IO(comptime storageSize: usize) type {
     };
 }
 
+pub const IOEvent = union(enum) {
+    // Not really sure what to do with this here. For now we'll just print it out.
+    read: [2]usize,
+    write: []const u8,
+};
+
 test "basic write test" {
     var io = IO(10){ .fd = std.posix.STDOUT_FILENO, .kq = std.posix.kqueue() catch unreachable };
     io.write("hello") catch unreachable;
+    io.write(" ") catch unreachable;
+    io.write("world") catch unreachable;
     io.run_for_ns(20) catch unreachable;
 
     const fd2 = try std.posix.openZ("test.txt", .{
@@ -108,5 +122,6 @@ test "basic write test" {
     defer std.posix.close(fd2);
     var io2 = IO(100){ .fd = fd2, .kq = std.posix.kqueue() catch unreachable };
     try io2.write("hello");
-    io2.run_for_ns(20) catch unreachable;
+    try io2.write("ff");
+    io2.run_for_ns(50) catch unreachable;
 }

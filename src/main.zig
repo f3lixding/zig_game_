@@ -5,8 +5,15 @@ const runServer = @import("server.zig").runServer;
 const spawn = std.Thread.spawn;
 const Game = @import("game.zig").Game;
 const MultiShotTube = @import("channel/multi_shot_tube.zig").MultiShotTube;
+const IO = @import("kevent.zig").IO;
+const std_options = @import("logging.zig").std_options;
 
 pub fn main() anyerror!void {
+    // logging experiment
+    std.log.debug("hello this is a message", .{});
+    const my_project_log = std.log.scoped(.my_project);
+    my_project_log.debug("hello this is a message", .{});
+    // Trying out raylib
     const screenWidth = 800;
     const screenHeight = 450;
     var ballPosition = rl.Vector2.init(screenWidth / 2, screenHeight / 2);
